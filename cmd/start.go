@@ -16,10 +16,21 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
+	"github.com/gen2brain/beeep"
 	api "github.com/miguelmota/go-coinmarketcap/v2"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"log"
+	"os"
 	"strconv"
 	"time"
+)
+
+const (
+	High = "HIGH"
+	Low = "LOW"
 )
 
 // startCmd represents the start command
@@ -28,15 +39,12 @@ var startCmd = &cobra.Command{
 	Short: "the start command receives a ticker, a retrieval interval, an upperbound, and a lowerbound",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
+		// TODO: configurable timer via flag?
+		timer := time.Minute
+
 		ticker := args[0]
-		timerString := args[1]
 		upperBound := args[2]
 		lowerBound := args[3]
-
-		timer, err := time.ParseDuration(timerString)
-		if err != nil {
-			fmt.Println(err)
-		}
 
 		upperBoundNum, err := strconv.ParseInt(upperBound, 10, 32)
 		if err != nil {
@@ -66,32 +74,43 @@ func init() {
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
-	// startCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+
+	// TODO: configurable timer via flag? Configurable ICON? Configurable Noise?
+	//startCmd.Flags().Int8P("timer", "t", 1, "timer in minutes")
 }
 
 func start(ticker string, timer time.Duration, upperBound, lowerBound float64) error {
-	// TODO: need to cast bounds to appropriate datatype before comparisons
-	price, err := getPrice(ticker)
-	if err != nil {
-		return err
-	}
+	for {
+		price, err := getPrice(ticker)
+		if err != nil {
+			return err
+		}
 
-	if price < lowerBound {
-		fmt.Println("price has fallen beneath lowerBound")
-		roar()
-		time.Sleep(time.Minute * 20)
-	} else if price > upperBound {
-		fmt.Println("price has risen above upperbound")
-		roar()
-		time.Sleep(time.Minute * 20)
-	}
+		if price < lowerBound {
+			err := roar(ticker, "LOW", price)
+			if err != nil {
+				return err
+			}
+			time.Sleep(time.Minute * 15)
+		} else if price > upperBound {
+			err := roar(ticker, "HIGH", price)
+			if err != nil {
+				return err
+			}
+			time.Sleep(time.Minute * 15)
+		}
 
-	time.Sleep(timer)
-	return nil
+		time.Sleep(timer)
+		return nil
+	}
 }
 
 func getPrice(ticker string) (price float64, err error) {
-	// TODO: refactor variadic input or make command elligible for variadic input
+	if len(ticker) > 5  || len(ticker) < 3{
+		err := errors.New("Invalid Ticker")
+		return 0, err
+	}
+
 	priceOptions := &api.PriceOptions{
 		Symbol:  ticker,
 		Convert: "USD",
@@ -99,12 +118,47 @@ func getPrice(ticker string) (price float64, err error) {
 
 	quote, err := api.Price(priceOptions)
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrap(err, "Could not retrieve Price: ")
 	}
 
 	return quote, err
 }
 
-func roar() {
+func roar(ticker, status string, price float64) error {
+	var msg string
+	var title string
 
+	if status == Low {
+		title = fmt.Sprintf("%s: Above Threshold", ticker)
+		msg = fmt.Sprintf("the price has risen above the set threshold: %v", price)
+	} else if status == High {
+		title = fmt.Sprintf("%s: Below Threshold", ticker)
+		msg = fmt.Sprintf("the price has fallen below the set threshold: %v", price)
+	}
+
+	err := beeep.Alert(title, msg, "../assets/baseline_warning_black_18dp.png")
+	if err != nil {
+		panic(err)
+	}
+
+	filename := "YOU_SUFFER.mp3"
+
+	f, err := os.Open(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	streamer, format, err := mp3.Decode(f)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer streamer.Close()
+
+	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+
+	speaker.Play(streamer)
+
+	return nil
 }
+
