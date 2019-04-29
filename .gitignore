@@ -10,4 +10,9 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+
+#ide stuff
 .idea
+
+#bitgrowl binary
+bitgrowl
